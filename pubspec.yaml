@@ -1,0 +1,45 @@
+name: sitirnati
+description: "Sitirnati — order a water tanker, tap to pin your location, send the request."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  intl: any
+  shared_preferences: ^2.5.4
+  flutter_map: ^8.2.2
+  latlong2: ^0.9.1
+  geolocator: ^14.0.2
+
+  # Liquid glass morphing menu (the header action button).
+  liquid_glass_easy: ^5.2.0
+
+  # Local Liquid Glass bottom navigation bar (iOS 26 material).
+  liquid_glass_bottom_navbar_plus:
+    path: packages/liquid_glass_bottom_navbar_plus
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  fonts:
+    - family: Tajawal
+      fonts:
+        - asset: assets/fonts/Tajawal-Regular.ttf
+        - asset: assets/fonts/Tajawal-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Tajawal-Bold.ttf
+          weight: 700

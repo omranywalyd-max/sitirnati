@@ -1,0 +1,21 @@
+name: liquid_glass_bottom_navbar_plus
+description: >-
+  Apple iOS 26 "Liquid Glass" bottom navigation bar for Flutter — refraction,
+  specular highlights, adaptive tint, fluid morphing, scroll-minimize and a
+  universal frosted fallback. Local fork used by Sitirnati.
+version: 1.0.0
+publish_to: 'none'
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:

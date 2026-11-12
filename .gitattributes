@@ -1,0 +1,16 @@
+# Normalise text files to LF in the repository so diffs stay readable on any
+# platform; Windows-only scripts keep CRLF so cmd.exe still runs them.
+* text=auto eol=lf
+
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binary assets: never diff, never convert.
+*.png   binary
+*.jpg   binary
+*.ttf   binary
+*.otf   binary
+*.jar   binary
+*.jks   binary
+*.keystore binary
