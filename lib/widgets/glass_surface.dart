@@ -15,14 +15,16 @@ import '../theme/app_theme.dart';
 ///
 /// ## Why it stays smooth
 ///
-/// * One capture, not one per surface. When a [BackdropGroup] is in scope the
-///   filter uses [BackdropFilter.grouped], so the engine blurs the backdrop
-///   once and reuses the result for every panel in the group. Six cards cost
-///   one blur pass, not six.
-/// * Small surfaces skip the blur. A chip inside an already-frosted card has
-///   nothing new to sample, so it passes `blur: 0` and pays nothing.
-/// * Blur is dropped when the platform asks for reduced motion / transparency,
-///   and on the very cheapest devices the tint alone still reads as glass.
+/// * **The blur is off by default** (`AppGlass.cardBlur == 0`). A card sits on
+///   the canvas, and the canvas is already soft — a baked, blurred cloud field.
+///   Blurring a blur is invisible on screen, yet it was being paid for on every
+///   frame of every scroll, once per card. That was the scroll jank. With
+///   `blur: 0` the [BackdropFilter] is not built at all: the panel is a tint,
+///   a sheen and a rim, which is what the eye reads anyway.
+/// * The frost is kept where content actually moves behind the glass — sheets,
+///   dialogs, the floating map panels — because there the blur *is* the point.
+/// * Small surfaces never blur. A chip inside a card has nothing new to sample.
+/// * Blur is dropped when the platform asks for reduced motion / transparency.
 class GlassSurface extends StatelessWidget {
   /// Creates a glass panel around [child].
   const GlassSurface({
@@ -105,7 +107,9 @@ class GlassSurface extends StatelessWidget {
         children: [
           // 1. The frost itself, plus the tint laid over the blurred backdrop.
           if (sigma > 0)
-            Positioned.fill(child: _Frost(tint: tint, sigma: sigma, saturation: saturation))
+            Positioned.fill(
+              child: _Frost(tint: tint, sigma: sigma, saturation: saturation),
+            )
           else
             Positioned.fill(child: ColoredBox(color: tint)),
           // 2. Sheen: light landing on the top edge of the sheet.
@@ -247,10 +251,7 @@ class MetaChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpace.md,
-        vertical: 6,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: AppSpace.md, vertical: 6),
       decoration: BoxDecoration(
         color: const Color(0x0FFFFFFF),
         borderRadius: BorderRadius.circular(AppRadius.chip),

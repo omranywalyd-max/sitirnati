@@ -159,7 +159,8 @@ class _HomeShellState extends State<HomeShell> {
     }
     final confirmed = await _confirm(
       title: 'تمسح كل الطلبيات؟',
-      message: 'راح تمسح ${_orders.length} طلبية من هذا الهاتف. '
+      message:
+          'راح تمسح ${_orders.length} طلبية من هذا الهاتف. '
           'هذا ما يتصلحش.',
       confirmLabel: 'امسح الكل',
     );
@@ -264,51 +265,51 @@ class _HomeShellState extends State<HomeShell> {
         child: Scaffold(
           backgroundColor: Colors.transparent,
           extendBody: true,
-          // One backdrop capture for the whole page: every card, chip and
-          // button in here shares it, so the engine blurs the gradient once
-          // instead of once per panel. The bottom bar and the sheets live
-          // outside the group and sample the live content instead.
-          body: BackdropGroup(
-            child: Stack(
-              children: [
-                IndexedStack(
-                  index: _page,
-                  children: [
-                    BrowsePage(onOrderTruck: _startOrder),
-                    OrdersPage(
-                      orders: _orders,
-                      loading: _loading,
-                      onDelete: _deleteOrder,
-                      onBrowse: () => setState(() => _page = _browsePage),
-                    ),
-                  ],
-                ),
-                GlassMorphMenu(
-                  anchor: Alignment.topLeft,
-                  padding: const EdgeInsets.only(
-                    top: AppSpace.md,
-                    left: AppSpace.lg,
+          // No [BackdropGroup] here any more: nothing in the body blurs its
+          // backdrop (cards and buttons pass `blur: 0`, because they sit on an
+          // already-soft canvas), so a shared capture would be a full-screen
+          // layer per frame for zero pixels of difference. The bar and the
+          // sheets keep their own live frost, where content really does move
+          // behind the glass.
+          body: Stack(
+            children: [
+              IndexedStack(
+                index: _page,
+                children: [
+                  BrowsePage(onOrderTruck: _startOrder),
+                  OrdersPage(
+                    orders: _orders,
+                    loading: _loading,
+                    onDelete: _deleteOrder,
+                    onBrowse: () => setState(() => _page = _browsePage),
                   ),
-                  items: [
-                    GlassMenuItem(
-                      icon: Icons.receipt_long_rounded,
-                      label: 'طلبياتي',
-                      onTap: () => setState(() => _page = _ordersPage),
-                    ),
-                    GlassMenuItem(
-                      icon: Icons.delete_sweep_rounded,
-                      label: 'مسح الطلبيات',
-                      onTap: _clearOrders,
-                    ),
-                    GlassMenuItem(
-                      icon: Icons.info_outline_rounded,
-                      label: 'حول سيترنتي',
-                      onTap: _showAbout,
-                    ),
-                  ],
+                ],
+              ),
+              GlassMorphMenu(
+                anchor: Alignment.topLeft,
+                padding: const EdgeInsets.only(
+                  top: AppSpace.md,
+                  left: AppSpace.lg,
                 ),
-              ],
-            ),
+                items: [
+                  GlassMenuItem(
+                    icon: Icons.receipt_long_rounded,
+                    label: 'طلبياتي',
+                    onTap: () => setState(() => _page = _ordersPage),
+                  ),
+                  GlassMenuItem(
+                    icon: Icons.delete_sweep_rounded,
+                    label: 'مسح الطلبيات',
+                    onTap: _clearOrders,
+                  ),
+                  GlassMenuItem(
+                    icon: Icons.info_outline_rounded,
+                    label: 'حول سيترنتي',
+                    onTap: _showAbout,
+                  ),
+                ],
+              ),
+            ],
           ),
           bottomNavigationBar: Directionality(
             textDirection: TextDirection.ltr,

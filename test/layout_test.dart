@@ -39,7 +39,7 @@ void main() {
       tester.view.reset();
       tester.platformDispatcher.clearTextScaleFactorTestValue();
     });
-    await tester.pumpWidget(const SitirnatiApp());
+    await tester.pumpWidget(const SitirnatiApp(showSplash: false));
     await tester.pump(const Duration(milliseconds: 900));
   }
 

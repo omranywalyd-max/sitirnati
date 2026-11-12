@@ -1,4 +1,5 @@
-import 'dart:ui';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
@@ -84,14 +85,21 @@ abstract final class AppColors {
 /// a hairline rim — so a card, a button and the bar read as the same material.
 /// Only the tint and the blur radius change with the surface.
 abstract final class AppGlass {
-  /// Blur sigma for cards and list rows.
-  static const cardBlur = 10.0;
+  /// Blur sigma for cards and list rows: **none**.
+  ///
+  /// A card sits on the canvas, and the canvas is already soft (a baked,
+  /// blurred cloud field). Blurring a blur is invisible on screen but is paid
+  /// for on every frame of every scroll, per card — this was the main cause of
+  /// the scroll jank. The smoked tint, the sheen and the rim carry the material;
+  /// the frost is kept only where content actually moves behind the glass.
+  static const cardBlur = 0.0;
 
-  /// Blur sigma for sheets, dialogs and the floating panels on the map.
-  static const sheetBlur = 16.0;
+  /// Blur sigma for sheets, dialogs and the floating panels on the map: these
+  /// really do float over scrolling content, so the frost is the point.
+  static const sheetBlur = 14.0;
 
-  /// Blur sigma for buttons, which are small and get away with less.
-  static const buttonBlur = 8.0;
+  /// Blur sigma for buttons: none, same reasoning as [cardBlur].
+  static const buttonBlur = 0.0;
 
   /// Saturation boost applied with the blur: frosted glass brightens what it
   /// covers instead of washing it to grey.
@@ -116,11 +124,14 @@ abstract final class AppGlass {
   static const sheen = Color(0x1AFFFFFF);
 
   /// Contact shadow under a floating panel.
+  ///
+  /// Kept tight (18 / 8): a wide soft shadow under every card is one more blur
+  /// per card per frame, and the canvas is dark enough that a tight shadow
+  /// separates the panel just as well.
   static const List<BoxShadow> shadow = [
-    BoxShadow(color: Color(0x73000000), blurRadius: 26, offset: Offset(0, 12)),
+    BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 8)),
   ];
 }
-
 
 /// 4pt spacing rhythm. Named so a layout reads as intent, not arithmetic.
 abstract final class AppSpace {
@@ -156,9 +167,27 @@ abstract final class AppMotion {
   static const exit = Cubic(0.4, 0.0, 1.0, 1.0);
 }
 
-/// The black-to-gray gradient canvas behind every screen: a vertical ramp plus
-/// soft gray clouds blurred as one group, so the glass surfaces above always
-/// have something uneven to sit on.
+/// The black-to-gray gradient canvas behind every screen: a vertical ramp, soft
+/// gray clouds, and a smoked sheet over them, so the glass surfaces above
+/// always have something uneven to sit on.
+///
+/// ## Why this is cheap
+///
+/// The canvas never changes, so it is painted **once**. It used to draw twelve
+/// radial blobs every frame inside a full-screen [ImageFiltered] with a
+/// 70-sigma blur — a screen-sized blur re-rasterised on every frame of every
+/// scroll and every tab switch. That was the single most expensive thing in the
+/// app. Now:
+///
+/// * the ramp is one GPU gradient fill (free, and no banding);
+/// * the blurred clouds are baked once into a small image ([_CloudBake]), and
+///   every later frame is one textured rectangle;
+/// * the whole static stack sits in a [RepaintBoundary], so the scrolling
+///   content above it never invalidates it.
+///
+/// The look is unchanged: the bake uses the same blob geometry, the same
+/// gradient stops and the same blur sigma as the live version it replaced,
+/// which is still there as a fallback.
 class GradientBackdrop extends StatelessWidget {
   /// Creates the gradient backdrop around [child].
   const GradientBackdrop({super.key, required this.child});
@@ -168,54 +197,212 @@ class GradientBackdrop extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            AppColors.bgTop,
-            AppColors.bgMid,
-            AppColors.bgDeep,
-            AppColors.bgLow,
-            AppColors.bgBottom,
-          ],
-          stops: [0.0, 0.28, 0.55, 0.82, 1.0],
-        ),
-      ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 70, sigmaY: 70),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final w = constraints.maxWidth;
-                  final h = constraints.maxHeight;
-                  return Stack(
-                    clipBehavior: Clip.none,
-                    children: [
-                      for (final (fx, fy, fd) in _scatter)
-                        Positioned(
-                          left: fx * w - (fd * w) / 2,
-                          top: fy * h - (fd * w) / 2,
-                          width: fd * w,
-                          height: fd * w,
-                          child: const _GrayBlob(),
-                        ),
-                    ],
-                  );
-                },
-              ),
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const Positioned.fill(child: RepaintBoundary(child: _StaticCanvas())),
+        child,
+      ],
+    );
+  }
+}
+
+/// The three static layers of the canvas, cached as one layer.
+class _StaticCanvas extends StatelessWidget {
+  const _StaticCanvas();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Stack(
+      fit: StackFit.expand,
+      children: [
+        // 1. The vertical ramp: black easing into graphite gray.
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: _rampColors,
+              stops: _rampStops,
             ),
           ),
-          // A smoked sheet over the clouds: the gray reads as something blurred
-          // *under* a dark surface rather than painted on top of it.
-          const Positioned.fill(child: ColoredBox(color: Color(0x3D000000))),
-          child,
+        ),
+        // 2. The clouds.
+        _Clouds(),
+        // 3. A smoked sheet over the clouds: the gray reads as something blurred
+        //    *under* a dark surface rather than painted on top of it.
+        ColoredBox(color: Color(0x3D000000)),
+      ],
+    );
+  }
+}
+
+const _rampColors = <Color>[
+  AppColors.bgTop,
+  AppColors.bgMid,
+  AppColors.bgDeep,
+  AppColors.bgLow,
+  AppColors.bgBottom,
+];
+const _rampStops = <double>[0.0, 0.28, 0.55, 0.82, 1.0];
+
+/// The cloud field: the baked image when the engine can bake, the live
+/// [ImageFiltered] version otherwise.
+class _Clouds extends StatelessWidget {
+  const _Clouds();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = constraints.biggest;
+        if (!size.isFinite || size.isEmpty) return const SizedBox.shrink();
+        final baked = _CloudBake.imageFor(size);
+        if (baked != null) {
+          return CustomPaint(
+            size: size,
+            isComplex: true,
+            painter: _BakedClouds(baked),
+          );
+        }
+        return _LiveClouds(size: size);
+      },
+    );
+  }
+}
+
+/// Draws the baked cloud field stretched over the canvas.
+class _BakedClouds extends CustomPainter {
+  const _BakedClouds(this.image);
+
+  final ui.Image image;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.drawImageRect(
+      image,
+      Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
+      Offset.zero & size,
+      Paint()..filterQuality = FilterQuality.medium,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_BakedClouds oldDelegate) => oldDelegate.image != image;
+}
+
+/// The original live implementation, kept as the fallback: twelve blobs inside
+/// one 70-sigma blur. Identical pixels to the bake, far more expensive.
+class _LiveClouds extends StatelessWidget {
+  const _LiveClouds({required this.size});
+
+  final Size size;
+
+  @override
+  Widget build(BuildContext context) {
+    return ImageFiltered(
+      imageFilter: ui.ImageFilter.blur(sigmaX: 70, sigmaY: 70),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          for (final (fx, fy, fd) in _scatter)
+            Positioned(
+              left: fx * size.width - (fd * size.width) / 2,
+              top: fy * size.height - (fd * size.width) / 2,
+              width: fd * size.width,
+              height: fd * size.width,
+              child: const _GrayBlob(),
+            ),
         ],
       ),
     );
+  }
+}
+
+/// Bakes the blurred cloud field once, at a fraction of the screen size.
+///
+/// The canvas is a smooth, low-contrast gradient, so a third of the resolution
+/// upscaled with bilinear filtering is indistinguishable from the full-size
+/// version — and it is ~150 KB instead of a per-frame blur. One image is kept
+/// per window size; a resize (rotation, split screen) simply bakes again and
+/// lets the previous image go, which is bounded and tiny.
+abstract final class _CloudBake {
+  /// Baked resolution relative to the logical size.
+  static const _scale = 0.34;
+
+  /// Sigma of the group blur, in logical pixels (the old live value).
+  static const _sigma = 70.0;
+
+  static ui.Image? _image;
+  static Size? _size;
+  static bool _unavailable = false;
+
+  /// The baked field for [size], or `null` if this engine cannot bake.
+  static ui.Image? imageFor(Size size) {
+    if (_unavailable) return null;
+    final cached = _image;
+    if (cached != null && _size == size) return cached;
+    try {
+      final baked = _bake(size);
+      _image = baked;
+      _size = size;
+      return baked;
+    } catch (_) {
+      // Baking is an optimisation, never a requirement: fall back to the live
+      // filter and stop retrying.
+      _unavailable = true;
+      return null;
+    }
+  }
+
+  static ui.Image _bake(Size size) {
+    final w = math.max(1, (size.width * _scale).round());
+    final h = math.max(1, (size.height * _scale).round());
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(
+      recorder,
+      Rect.fromLTWH(0, 0, w.toDouble(), h.toDouble()),
+    );
+    // Everything is drawn in logical pixels; the matrix shrinks the drawing —
+    // the blur sigma included — into the small bitmap, so the result matches
+    // the live filter.
+    canvas.scale(w / size.width, h / size.height);
+    final rect = Offset.zero & size;
+
+    // The blobs are blurred as one group, exactly like the live filter. The
+    // layer is inflated by 3 sigma so clouds bleeding off an edge still feed
+    // the blur.
+    canvas.saveLayer(
+      rect.inflate(_sigma * 3),
+      Paint()
+        ..imageFilter = ui.ImageFilter.blur(
+          sigmaX: _sigma,
+          sigmaY: _sigma,
+          tileMode: ui.TileMode.decal,
+        ),
+    );
+    for (final (fx, fy, fd) in _scatter) {
+      final center = Offset(fx * size.width, fy * size.height);
+      final radius = fd * size.width / 2;
+      canvas.drawCircle(
+        center,
+        radius,
+        Paint()
+          ..shader = ui.Gradient.radial(
+            center,
+            radius,
+            _cloudColors,
+            _cloudStops,
+          ),
+      );
+    }
+    canvas.restore();
+
+    final picture = recorder.endRecording();
+    final image = picture.toImageSync(w, h);
+    picture.dispose();
+    return image;
   }
 }
 
@@ -239,6 +426,9 @@ const _scatter = <(double, double, double)>[
 
 /// One cloud puff. No solid core, no hard rim: alpha falls across the whole
 /// radius and lands on zero exactly at the edge.
+///
+/// The same colours and stops feed the bake ([_CloudBake]), so both paths draw
+/// the identical field.
 class _GrayBlob extends StatelessWidget {
   const _GrayBlob();
 
@@ -247,38 +437,40 @@ class _GrayBlob extends StatelessWidget {
     return const DecoratedBox(
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: RadialGradient(
-          colors: [
-            Color(0x8C5A5A64),
-            Color(0x7A53535C),
-            Color(0x5E4A4A52),
-            Color(0x3D3C3C44),
-            Color(0x1F2C2C33),
-            Color(0x001F1F25),
-          ],
-          stops: [0.0, 0.28, 0.5, 0.7, 0.88, 1.0],
-        ),
+        gradient: RadialGradient(colors: _cloudColors, stops: _cloudStops),
       ),
     );
   }
 }
 
+/// Cloud colour ramp, dimmed on purpose so text stays legible everywhere.
+const _cloudColors = <Color>[
+  AppColors.cloud,
+  Color(0x7A53535C),
+  Color(0x5E4A4A52),
+  Color(0x3D3C3C44),
+  Color(0x1F2C2C33),
+  Color(0x001F1F25),
+];
+const _cloudStops = <double>[0.0, 0.28, 0.5, 0.7, 0.88, 1.0];
+
 /// The app theme: dark, Tajawal, one cyan accent, no Material purple anywhere.
 ThemeData buildAppTheme() {
-  final scheme = ColorScheme.fromSeed(
-    seedColor: AppColors.accent,
-    brightness: Brightness.dark,
-  ).copyWith(
-    primary: AppColors.accent,
-    onPrimary: AppColors.onAccent,
-    secondary: AppColors.accent,
-    onSecondary: AppColors.onAccent,
-    surface: AppColors.bgDeep,
-    onSurface: AppColors.textPrimary,
-    surfaceContainerHigh: AppColors.surfaceSheet,
-    error: AppColors.danger,
-    onError: AppColors.bgTop,
-  );
+  final scheme =
+      ColorScheme.fromSeed(
+        seedColor: AppColors.accent,
+        brightness: Brightness.dark,
+      ).copyWith(
+        primary: AppColors.accent,
+        onPrimary: AppColors.onAccent,
+        secondary: AppColors.accent,
+        onSecondary: AppColors.onAccent,
+        surface: AppColors.bgDeep,
+        onSurface: AppColors.textPrimary,
+        surfaceContainerHigh: AppColors.surfaceSheet,
+        error: AppColors.danger,
+        onError: AppColors.bgTop,
+      );
 
   return ThemeData(
     useMaterial3: true,
@@ -287,7 +479,10 @@ ThemeData buildAppTheme() {
     fontFamily: 'Tajawal',
     scaffoldBackgroundColor: AppColors.bgTop,
     canvasColor: AppColors.bgTop,
-    splashFactory: InkSparkle.splashFactory,
+    // InkRipple is a plain canvas ripple. InkSparkle is a fragment shader that
+    // compiles on the first tap (a visible stutter) and costs more on every
+    // card it lands on.
+    splashFactory: InkRipple.splashFactory,
     visualDensity: VisualDensity.standard,
     textTheme: const TextTheme(
       // Display: 2.4x the body size, short, one per screen.
@@ -353,10 +548,7 @@ ThemeData buildAppTheme() {
         fontSize: 14,
         fontWeight: FontWeight.w400,
       ),
-      labelStyle: const TextStyle(
-        color: AppColors.textSecondary,
-        fontSize: 14,
-      ),
+      labelStyle: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
       floatingLabelStyle: const TextStyle(
         color: AppColors.accent,
         fontSize: 13,

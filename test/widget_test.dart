@@ -14,7 +14,7 @@ void main() {
   });
 
   testWidgets('opens on the browse tab with the driver list', (tester) async {
-    await tester.pumpWidget(const SitirnatiApp());
+    await tester.pumpWidget(const SitirnatiApp(showSplash: false));
     await tester.pump(const Duration(milliseconds: 900));
 
     expect(find.text('سيترنتي'), findsOneWidget);
@@ -24,7 +24,7 @@ void main() {
   });
 
   testWidgets('exposes both destinations in the glass bar', (tester) async {
-    await tester.pumpWidget(const SitirnatiApp());
+    await tester.pumpWidget(const SitirnatiApp(showSplash: false));
     await tester.pump(const Duration(milliseconds: 900));
 
     expect(find.text('اطلب'), findsWidgets);

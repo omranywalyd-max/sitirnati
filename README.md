@@ -11,6 +11,7 @@ is stored locally on the phone under «طلبياتي» (my orders).
 |---|---|---|---|
 | 1 | Browse (اطلب) | `lib/pages/browse_page.dart` | Water-type filter + driver cards (name, water type, price, volume). Tapping «اطلب الآن» opens the order form. |
 | 2 | Orders (طلبياتي) | `lib/pages/orders_page.dart` | Saved orders, newest first, with a status badge. Empty state + skeleton loading. |
+| — | Splash | `lib/pages/splash_page.dart` | One 1200 ms brand sequence (mark, halo, name, hairline), then a cross-fade into the shell. |
 | — | Order form | `lib/widgets/order_form_sheet.dart` | Name, place, phone, map pin. Per-field validation. |
 | — | Map picker | `lib/pages/map_picker_page.dart` | OpenStreetMap via `flutter_map`, CARTO `dark_all` tiles (no API key). Geolocation with every failure path handled in Arabic. |
 | — | Success dialog | `lib/widgets/order_success_dialog.dart` | Animated confirmation: drawn check mark, order summary, «شوف طلبياتي». |
@@ -22,7 +23,7 @@ Glass bottom bar).
 
 ```
 lib/
-  main.dart                       App entry, system UI, glass engine flags
+  main.dart                       App entry, system UI, glass engine flags, splash → shell
   models/                         Order, Truck (plain immutable classes)
   data/sample_trucks.dart         5 hardcoded drivers — the only fake data
   services/orders_store.dart      shared_preferences JSON persistence
@@ -37,6 +38,7 @@ lib/
     order_success_dialog.dart     confirmation dialog
   pages/
     home_shell.dart               tabs, bar index mirroring, order flow
+    splash_page.dart              animated first frame, then cross-fade
     browse_page.dart              tab 1
     orders_page.dart              tab 2
     map_picker_page.dart          map + geolocation
@@ -54,13 +56,23 @@ DESIGN.md                         design decisions and measured contrast
   `Duration` or magic radii. `AppColors` = primitives, named roles =
   semantic, components consume the semantic names.
 - **One glass recipe.** All surfaces use `GlassSurface`
-  (`lib/widgets/glass_surface.dart`): clipped `BackdropFilter` (blur +
-  saturation) → translucent tint → top sheen → hairline rim. Cards, buttons,
-  sheets and the dialog must look like the same material as the bottom bar.
-- **Performance.** The home body is wrapped in a `BackdropGroup` and
-  `GlassSurface` uses `BackdropFilter.grouped`, so all cards and buttons share
-  one backdrop capture. Keep new glass inside that group unless it floats over
-  moving content (bar, modal sheets, map page).
+  (`lib/widgets/glass_surface.dart`): translucent tint → top sheen → hairline
+  rim, with an optional clipped `BackdropFilter` (blur + saturation) in front.
+  Cards, buttons, sheets and the dialog must look like the same material as the
+  bottom bar.
+- **Performance — the blur is a budget, not a default.** `AppGlass.cardBlur` and
+  `buttonBlur` are `0`: cards sit on an already-soft canvas, so a live backdrop
+  blur over it is invisible but is paid for per card, per frame. Only surfaces
+  that really float over moving content (the bar, sheets, the dialog, map
+  panels — `AppGlass.sheetBlur`) keep a real frost. Don't raise `cardBlur`
+  without profiling a release build first.
+- **The canvas is painted once.** `GradientBackdrop` bakes its blurred cloud
+  field into a small `ui.Image` (`_CloudBake`) and blits it; `_LiveClouds` is
+  the fallback. Keep it `const` and inside its `RepaintBoundary` so scrolling
+  content never invalidates it.
+- **No `BackdropGroup`.** Nothing in the body uses `BackdropFilter.grouped` any
+  more, so a shared capture would be a full-screen layer per frame for zero
+  visual difference.
 - **RTL + the bar.** The bar's selection-pill geometry is LTR-only, so the bar
   is wrapped in `Directionality(ltr)` and its items are ordered
   `[طلبياتي, اطلب]`; the page index is mirrored through `_barIndex` /
@@ -81,7 +93,7 @@ DESIGN.md                         design decisions and measured contrast
 ```bash
 flutter pub get
 flutter analyze                                        # must be: No issues found!
-flutter test                                           # 10 tests
+flutter test                                           # 11 tests
 node tool/contrast_check.mjs                           # 38/38 contrast pairs
 node tool/sample_golden.mjs test/goldens/browse.png    # real pixels of the bar
 flutter test --update-goldens test/visual_test.dart    # refresh goldens

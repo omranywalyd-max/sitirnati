@@ -94,7 +94,7 @@ class _GlassMorphMenuState extends State<GlassMorphMenu> {
     glow: LiquidGlassLight.glow(intensity: 0.45),
     color: Color(0x2EFFFFFF),
     saturation: 1.05,
-    blur: 14,
+    blur: AppGlass.sheetBlur,
     refractionIndex: 1.45,
     refractionWidth: 20,
     dispersion: 0.6,

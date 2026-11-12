@@ -35,9 +35,24 @@ void main() {
     tester.view.physicalSize = const Size(1170, 2532);
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(const SitirnatiApp());
+    await tester.pumpWidget(const SitirnatiApp(showSplash: false));
     await tester.pump(const Duration(milliseconds: 900));
   }
+
+  testWidgets('splash', (tester) async {
+    tester.view.physicalSize = const Size(1170, 2532);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(const SitirnatiApp());
+    // Mid-sequence, before the cross-fade to the shell: the mark has settled,
+    // the name has risen and the hairline is nearly full. The timeline is
+    // driven by time alone, so this frame is deterministic.
+    await tester.pump(const Duration(milliseconds: 1000));
+    await expectLater(
+      find.byType(SitirnatiApp),
+      matchesGoldenFile('goldens/splash.png'),
+    );
+  });
 
   testWidgets('browse tab', (tester) async {
     await pumpApp(tester);
