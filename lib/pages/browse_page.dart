@@ -1,22 +1,36 @@
 import 'package:flutter/material.dart';
 
-import '../data/sample_trucks.dart';
-import '../models/truck.dart';
+import '../models/driver_offer.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_buttons.dart';
+import '../widgets/driver_card.dart';
 import '../widgets/glass_surface.dart';
-import '../widgets/truck_card.dart';
 
-/// Tab one: the driver directory.
+/// Tab one: the drivers who are on shift right now.
 ///
-/// One leading element (the display title), then a water-type filter, then the
+/// One leading element (the display title), then the water-type filter, then the
 /// cards. Nothing competes with the title for the first look.
+///
+/// The list is live: it is a stream of `drivers` documents whose `active` flag
+/// is on, so a driver who goes off shift disappears from here within a second,
+/// and one who comes on shift appears without a refresh.
 class BrowsePage extends StatefulWidget {
   /// Creates the browse tab.
-  const BrowsePage({super.key, required this.onOrderTruck});
+  const BrowsePage({
+    super.key,
+    required this.offers,
+    required this.loading,
+    required this.onOrder,
+  });
 
-  /// Called with the truck whose card was tapped.
-  final ValueChanged<Truck> onOrderTruck;
+  /// Available drivers, cheapest first.
+  final List<DriverOffer> offers;
+
+  /// Whether the first snapshot is still on its way.
+  final bool loading;
+
+  /// Called with the offer whose card was tapped.
+  final ValueChanged<DriverOffer> onOrder;
 
   @override
   State<BrowsePage> createState() => _BrowsePageState();
@@ -27,23 +41,38 @@ class _BrowsePageState extends State<BrowsePage> {
 
   String _filter = _all;
 
+  /// The water grades actually present right now.
+  ///
+  /// Built from the live list, not from a constant: a filter chip that matches
+  /// nothing is a dead end, and a grade nobody carries should not be offered.
   List<String> get _waterTypes {
     final types = <String>[];
-    for (final truck in sampleTrucks) {
-      if (!types.contains(truck.waterType)) types.add(truck.waterType);
+    for (final offer in widget.offers) {
+      if (offer.waterType.isNotEmpty && !types.contains(offer.waterType)) {
+        types.add(offer.waterType);
+      }
     }
     return types;
   }
 
-  List<Truck> get _visible {
-    if (_filter == _all) return sampleTrucks;
-    return sampleTrucks.where((t) => t.waterType == _filter).toList();
+  List<DriverOffer> _visible(String filter) {
+    if (filter == _all) return widget.offers;
+    return widget.offers
+        .where((offer) => offer.waterType == filter)
+        .toList(growable: false);
   }
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    final trucks = _visible;
+    final types = _waterTypes;
+
+    // A filter whose grade no longer exists (the only driver carrying it went
+    // off shift) would leave the customer staring at an empty list with a chip
+    // they cannot explain, so the selection falls back to "all" — computed here
+    // rather than written into the state, because `build` must stay pure.
+    final filter = _filter != _all && !types.contains(_filter) ? _all : _filter;
+    final offers = _visible(filter);
 
     return SafeArea(
       bottom: false,
@@ -75,8 +104,8 @@ class _BrowsePageState extends State<BrowsePage> {
                             Text('سيترنتي', style: text.displaySmall),
                             const SizedBox(height: 6),
                             Text(
-                              'ماء يوصلك لباب الدار. اختار السائق، '
-                              'حدد مكانك بالخريطة، وابعث الطلب.',
+                              'ماء يوصلك لباب الدار. شوف السواقين المتوفرين '
+                              'دابا، حدد مكانك بالخريطة، وابعث الطلب.',
                               style: text.bodyMedium,
                             ),
                           ],
@@ -111,7 +140,7 @@ class _BrowsePageState extends State<BrowsePage> {
                           border: Border.all(color: AppColors.glassBorder),
                         ),
                         child: Text(
-                          '${trucks.length}',
+                          '${widget.offers.length}',
                           style: const TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w700,
@@ -122,24 +151,47 @@ class _BrowsePageState extends State<BrowsePage> {
                     ],
                   ),
                   const SizedBox(height: AppSpace.md),
-                  Wrap(
-                    spacing: AppSpace.sm,
-                    runSpacing: AppSpace.sm,
-                    children: [
-                      for (final type in [_all, ..._waterTypes])
-                        _FilterChip(
-                          label: type,
-                          selected: _filter == type,
-                          onTap: () => setState(() => _filter = type),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpace.lg),
+                  if (types.length > 1) ...[
+                    Wrap(
+                      spacing: AppSpace.sm,
+                      runSpacing: AppSpace.sm,
+                      children: [
+                        for (final type in [_all, ...types])
+                          _FilterChip(
+                            label: type,
+                            selected: filter == type,
+                            onTap: () => setState(() => _filter = type),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpace.lg),
+                  ] else
+                    const SizedBox(height: AppSpace.xs),
                 ],
               ),
             ),
           ),
-          if (trucks.isEmpty)
+          if (widget.loading && widget.offers.isEmpty)
+            const SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                AppSpace.lg,
+                0,
+                AppSpace.lg,
+                AppSpace.pageBottom,
+              ),
+              sliver: SliverToBoxAdapter(child: _LoadingDrivers()),
+            )
+          else if (widget.offers.isEmpty)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpace.lg,
+                0,
+                AppSpace.lg,
+                AppSpace.pageBottom,
+              ),
+              sliver: const SliverToBoxAdapter(child: _NoDrivers()),
+            )
+          else if (offers.isEmpty)
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(
                 AppSpace.lg,
@@ -162,15 +214,15 @@ class _BrowsePageState extends State<BrowsePage> {
                 AppSpace.pageBottom,
               ),
               sliver: SliverList.separated(
-                itemCount: trucks.length,
+                itemCount: offers.length,
                 separatorBuilder: (_, _) => const SizedBox(height: AppSpace.md),
                 itemBuilder: (context, index) {
-                  final truck = trucks[index];
+                  final offer = offers[index];
                   return _Reveal(
                     index: index,
-                    child: TruckCard(
-                      truck: truck,
-                      onOrder: () => widget.onOrderTruck(truck),
+                    child: DriverCard(
+                      offer: offer,
+                      onOrder: () => widget.onOrder(offer),
                     ),
                   );
                 },
@@ -252,7 +304,7 @@ class _FilterChip extends StatelessWidget {
   }
 }
 
-/// Shown when the filter matches nothing.
+/// Shown when the water-type filter matches nothing.
 class _NoResults extends StatelessWidget {
   const _NoResults({required this.onReset});
 
@@ -293,6 +345,89 @@ class _NoResults extends StatelessWidget {
   }
 }
 
+/// Shown when nobody is on shift at all — a different problem from a filter that
+/// matches nothing, so it says what actually happened and what to do about it.
+class _NoDrivers extends StatelessWidget {
+  const _NoDrivers();
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return GlassSurface(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpace.xl,
+        vertical: AppSpace.huge,
+      ),
+      child: Column(
+        children: [
+          ExcludeSemantics(
+            child: Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [AppColors.accentSoft, Color(0x0D5FD3E8)],
+                ),
+                border: Border.all(color: const Color(0x4D5FD3E8)),
+              ),
+              child: const Icon(
+                Icons.local_shipping_outlined,
+                size: 30,
+                color: AppColors.accent,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpace.lg),
+          Text(
+            'ما كاينش سائق متوفر دابا',
+            style: text.titleLarge,
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: AppSpace.xs),
+          Text(
+            'السواقين كيظهرو هنا كي يشعلو «نشط» في تطبيقهم. عاود شوف بعد '
+            'شوية — اللائحة تتبدل وحدها بلا ما تعاود تفتح التطبيق.',
+            style: text.bodyMedium,
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The first-snapshot placeholder: one panel, not a wall of spinners.
+class _LoadingDrivers extends StatelessWidget {
+  const _LoadingDrivers();
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassSurface(
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.huge),
+      child: Column(
+        children: [
+          const SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.2,
+              valueColor: AlwaysStoppedAnimation<Color>(AppColors.accent),
+            ),
+          ),
+          const SizedBox(height: AppSpace.md),
+          Text(
+            'نجيبو في السواقين المتوفرين…',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Fades and lifts a card into place once, staggered by its position.
 ///
 /// Honours the platform's "remove animations" setting: with animations
@@ -312,8 +447,7 @@ class _RevealState extends State<_Reveal>
   static const _baseDuration = 420;
   static const _stepDelay = 55;
 
-  late final int _delayMs =
-      widget.index.clamp(0, 6) * _stepDelay;
+  late final int _delayMs = widget.index.clamp(0, 6) * _stepDelay;
 
   late final AnimationController _controller = AnimationController(
     vsync: this,

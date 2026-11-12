@@ -26,6 +26,10 @@ dependencies:
   # Local Liquid Glass bottom navigation bar (iOS 26 material).
   liquid_glass_bottom_navbar_plus:
     path: packages/liquid_glass_bottom_navbar_plus
+  firebase_core: ^5.1.0
+  cloud_firestore: ^7.1.0
+  firebase_auth: ^7.0.1
+  url_launcher: ^6.3.3
 
 dev_dependencies:
   flutter_test:

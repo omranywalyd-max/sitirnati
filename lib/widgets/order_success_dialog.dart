@@ -151,8 +151,9 @@ class _OrderSuccessDialogState extends State<_OrderSuccessDialog>
                     ),
                     const SizedBox(height: AppSpace.sm),
                     Text(
-                      'طلبية ${order.driverName} تزادت في «طلبياتي» '
-                      'على هذا الهاتف بحالة «مُرسل».',
+                      'طلبية ${formatVolume(order.volumeM3)} بـ'
+                      '${formatDzd(order.price)} دج تسجلت في «طلبياتي» و '
+                      'تبعثت للسواقين المتوفرين. أول واحد يقبلها يبان اسمه هنا.',
                       textAlign: TextAlign.center,
                       style: text.bodyMedium,
                     ),
@@ -301,9 +302,10 @@ class _StatusLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (icon, tone) = switch (status) {
-      OrderStatus.sent => (Icons.send_rounded, AppColors.warning),
+      OrderStatus.sent => (Icons.hourglass_top_rounded, AppColors.warning),
       OrderStatus.accepted => (Icons.local_shipping_rounded, AppColors.accent),
       OrderStatus.delivered => (Icons.check_circle_rounded, AppColors.success),
+      OrderStatus.cancelled => (Icons.cancel_rounded, AppColors.danger),
     };
 
     return Center(
@@ -358,7 +360,7 @@ class _OrderSummary extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _SummaryRow(label: 'السائق', value: order.driverName),
+          _SummaryRow(label: 'المكان', value: order.placeName),
           const _SummaryDivider(),
           _SummaryRow(label: 'الماء', value: order.waterType),
           const _SummaryDivider(),

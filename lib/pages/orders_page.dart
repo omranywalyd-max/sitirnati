@@ -6,26 +6,37 @@ import '../utils/formatters.dart';
 import '../widgets/app_buttons.dart';
 import '../widgets/glass_surface.dart';
 
-/// Tab two: everything the customer has ordered, newest first, stored on the
-/// device.
+/// Tab two: everything the customer has ordered, newest first.
+///
+/// Each card answers the three questions a waiting customer actually has: who
+/// is coming (or that nobody has taken it yet), how far along it is, and what it
+/// costs. The state is written in words and an icon, never colour alone.
 class OrdersPage extends StatelessWidget {
   /// Creates the orders tab.
   const OrdersPage({
     super.key,
     required this.orders,
     required this.loading,
+    required this.onCancel,
     required this.onDelete,
+    required this.onCall,
     required this.onBrowse,
   });
 
-  /// Cached orders, newest first.
+  /// The customer's orders, newest first.
   final List<Order> orders;
 
-  /// Whether the cache is still being read.
+  /// Whether the first snapshot is still on its way.
   final bool loading;
 
-  /// Removes one order.
+  /// Calls off an order that is still running.
+  final ValueChanged<Order> onCancel;
+
+  /// Removes a finished order from the history.
   final ValueChanged<Order> onDelete;
+
+  /// Dials the driver who claimed the order.
+  final ValueChanged<Order> onCall;
 
   /// Switches to the browse tab.
   final VoidCallback onBrowse;
@@ -33,6 +44,7 @@ class OrdersPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final running = orders.where((order) => !order.status.isClosed).length;
 
     return SafeArea(
       bottom: false,
@@ -60,8 +72,11 @@ class OrdersPage extends StatelessWidget {
                         const SizedBox(height: 6),
                         Text(
                           orders.isEmpty
-                              ? 'كل طلبية تبعتها تتخزن في هذا الهاتف.'
-                              : '${orders.length} طلبية محفوظة في هذا الهاتف.',
+                              ? 'كل طلبية تبعتها تبان هنا بحالتها.'
+                              : running > 0
+                                  ? '$running طلبية جارية · الحالة تتبدل وحدها '
+                                      'كي يرد السائق.'
+                                  : '${orders.length} طلبية · كلشي منتهي.',
                           style: text.bodyMedium,
                         ),
                       ],
@@ -90,7 +105,9 @@ class OrdersPage extends StatelessWidget {
                             for (final order in orders) ...[
                               _OrderCard(
                                 order: order,
+                                onCancel: () => onCancel(order),
                                 onDelete: () => onDelete(order),
+                                onCall: () => onCall(order),
                               ),
                               const SizedBox(height: AppSpace.md),
                             ],
@@ -187,7 +204,7 @@ class _EmptyOrders extends StatelessWidget {
           ),
           const SizedBox(height: AppSpace.xs),
           Text(
-            'اختار سائق من التبويب الأول، حدد مكانك على الخريطة، '
+            'شوف السواقين المتوفرين، حدد مكانك على الخريطة، '
             'والطلبية تبان هنا بحالتها.',
             style: text.bodyMedium,
             textAlign: TextAlign.center,
@@ -204,17 +221,24 @@ class _EmptyOrders extends StatelessWidget {
   }
 }
 
-/// One order, with its state spelled out in words and an icon, never colour
-/// alone.
+/// One order, with its state spelled out in words and an icon.
 class _OrderCard extends StatelessWidget {
-  const _OrderCard({required this.order, required this.onDelete});
+  const _OrderCard({
+    required this.order,
+    required this.onCancel,
+    required this.onDelete,
+    required this.onCall,
+  });
 
   final Order order;
+  final VoidCallback onCancel;
   final VoidCallback onDelete;
+  final VoidCallback onCall;
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    final waiting = order.status.isWaiting;
 
     return GlassSurface(
       padding: const EdgeInsets.all(AppSpace.lg),
@@ -228,25 +252,31 @@ class _OrderCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(order.driverName, style: text.titleMedium),
+                    // Who is coming, or the honest truth that nobody has taken
+                    // the order yet. Two different sentences, not one grey
+                    // placeholder.
+                    Text(
+                      order.hasDriver ? order.driverName : 'في انتظار سائق',
+                      style: text.titleMedium?.copyWith(
+                        color: order.hasDriver
+                            ? AppColors.textPrimary
+                            : AppColors.warning,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     const SizedBox(height: 3),
                     Text(
                       '${order.waterType} · ${formatVolume(order.volumeM3)}',
                       style: text.bodySmall,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: AppSpace.sm),
               _StatusBadge(status: order.status),
-              const SizedBox(width: AppSpace.xs),
-              GlassIconButton(
-                icon: Icons.delete_outline_rounded,
-                tooltip: 'حذف الطلبية',
-                size: 36,
-                tone: AppColors.danger,
-                onPressed: onDelete,
-              ),
             ],
           ),
           const SizedBox(height: AppSpace.md),
@@ -266,6 +296,14 @@ class _OrderCard extends StatelessWidget {
             icon: Icons.my_location_rounded,
             label: formatLatLng(order.lat, order.lng),
           ),
+          if (order.nearAt != null && order.status == OrderStatus.accepted) ...[
+            const SizedBox(height: AppSpace.sm),
+            _DetailRow(
+              icon: Icons.notifications_active_outlined,
+              label: 'السائق بلّغك بلي قريب منك',
+              tone: AppColors.accent,
+            ),
+          ],
           const SizedBox(height: AppSpace.md),
           Row(
             children: [
@@ -294,7 +332,88 @@ class _OrderCard extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: AppSpace.sm),
+          // Actions follow the state: a running order can be called off, and
+          // once a driver has claimed it the customer can ring that driver
+          // directly. A finished order only offers to leave the history.
+          // Showing "delete" on a job a driver is already driving to would
+          // invite stranding them.
+          Wrap(
+            spacing: AppSpace.sm,
+            runSpacing: AppSpace.xs,
+            children: [
+              if (order.status == OrderStatus.accepted &&
+                  order.driverPhone.isNotEmpty)
+                _CardAction(
+                  icon: Icons.call_rounded,
+                  label: 'اتصل بالسائق',
+                  tone: AppColors.accent,
+                  onPressed: onCall,
+                ),
+              if (order.canCancel)
+                _CardAction(
+                  icon: Icons.cancel_outlined,
+                  label: 'إلغاء الطلب',
+                  tone: AppColors.danger,
+                  onPressed: onCancel,
+                )
+              else
+                _CardAction(
+                  icon: Icons.delete_outline_rounded,
+                  label: 'امسح من السجل',
+                  tone: AppColors.textSecondary,
+                  onPressed: onDelete,
+                ),
+            ],
+          ),
+          if (waiting) ...[
+            const SizedBox(height: AppSpace.sm),
+            Text(
+              'الطلب عند السواقين المتوفرين. أول واحد يقبلو راح يبان اسمه هنا.',
+              style: text.bodySmall?.copyWith(height: 1.5),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+/// A quiet text action at the bottom of an order card.
+class _CardAction extends StatelessWidget {
+  const _CardAction({
+    required this.icon,
+    required this.label,
+    required this.tone,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color tone;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextButton.icon(
+      onPressed: onPressed,
+      icon: Icon(icon, size: 18, color: tone),
+      label: Text(
+        label,
+        style: TextStyle(
+          fontSize: 13.5,
+          fontWeight: FontWeight.w600,
+          color: tone,
+        ),
+      ),
+      style: TextButton.styleFrom(
+        foregroundColor: tone,
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.sm,
+          vertical: 6,
+        ),
+        minimumSize: const Size(0, 40),
+        tapTargetSize: MaterialTapTargetSize.padded,
       ),
     );
   }
@@ -309,9 +428,10 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (icon, tone) = switch (status) {
-      OrderStatus.sent => (Icons.send_rounded, AppColors.warning),
+      OrderStatus.sent => (Icons.hourglass_top_rounded, AppColors.warning),
       OrderStatus.accepted => (Icons.local_shipping_rounded, AppColors.accent),
       OrderStatus.delivered => (Icons.check_circle_rounded, AppColors.success),
+      OrderStatus.cancelled => (Icons.cancel_rounded, AppColors.danger),
     };
 
     return Container(
@@ -349,10 +469,15 @@ class _StatusBadge extends StatelessWidget {
 
 /// One line of order detail: glyph plus value.
 class _DetailRow extends StatelessWidget {
-  const _DetailRow({required this.icon, required this.label});
+  const _DetailRow({
+    required this.icon,
+    required this.label,
+    this.tone = AppColors.textSecondary,
+  });
 
   final IconData icon;
   final String label;
+  final Color tone;
 
   @override
   Widget build(BuildContext context) {
@@ -363,10 +488,10 @@ class _DetailRow extends StatelessWidget {
         Expanded(
           child: Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13.5,
               fontWeight: FontWeight.w500,
-              color: AppColors.textSecondary,
+              color: tone,
               height: 1.35,
             ),
             maxLines: 2,

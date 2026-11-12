@@ -1,10 +1,15 @@
+import 'dart:async';
+
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
+import 'firebase_options.dart';
 import 'pages/home_shell.dart';
 import 'pages/splash_page.dart';
+import 'services/auth_service.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
@@ -23,7 +28,37 @@ Future<void> main() async {
   LiquidGlassEngine.liteGlassOnSkia = true;
   LiquidGlassEngine.liteGlassOnImpeller = true;
 
+  await _bootBackend();
+
   runApp(const SitirnatiApp());
+}
+
+/// Starts Firebase, then the anonymous customer session.
+///
+/// The app initialisation itself is awaited because every later call needs it,
+/// and it reads only local config. The sign-in is **not** awaited: the splash
+/// animation covers it, and the orders stream waits for the uid on its own. A
+/// failed boot leaves the app running on the on-device cache instead of showing
+/// a black screen — the customer can still read their orders and retry later.
+Future<void> _bootBackend() async {
+  try {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    // Not awaited: the splash covers it, and the orders stream waits for the
+    // uid on its own. The error is handled here only so a phone with no data on
+    // its first launch does not report an unhandled future error; the retry
+    // lives in `AuthService`, which clears the failed boot.
+    unawaited(
+      AuthService.bootCustomer().then<void>(
+        (_) {},
+        onError: (Object error) =>
+            debugPrint('Customer sign-in failed, will retry: $error'),
+      ),
+    );
+  } catch (error) {
+    debugPrint('Firebase boot failed, running on the local cache: $error');
+  }
 }
 
 /// Transparent system bars with light icons over the dark canvas.

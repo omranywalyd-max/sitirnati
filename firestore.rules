@@ -1,0 +1,247 @@
+rules_version = '2';
+
+// Sitirnati — security rules for the two collections the two apps share.
+//
+// There are two clients and no server:
+//
+//   * the **customer** app, signed in anonymously. It writes its own orders and
+//     reads only them, plus the driver board (`drivers`, where `active == true`);
+//   * the **driver** app, signed in with a real account. It owns one
+//     `drivers/{uid}` document and works the *pool* of unclaimed orders.
+//
+// The pool is the whole design. An order is created with `driverUid == ''` and
+// belongs to nobody; every registered driver may read it, and the first one to
+// write their own uid into it takes it. The rules enforce that race in one
+// place: a claim is only allowed while `driverUid` is still empty, so of two
+// drivers accepting at the same moment exactly one write lands.
+//
+// Identity is never read from a client field. Ownership comes from the signed
+// token (`request.auth.uid`), and "is a driver?" is answered by the existence of
+// their profile document — the same document the customer app renders.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    // A driver is an account that finished the sign-up form, which is exactly
+    // "has a `drivers/{uid}` document". No custom claims, no operator-run
+    // account list: the profile is the registration.
+    function isRegisteredDriver() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/drivers/$(request.auth.uid));
+    }
+
+    // ------------------------------------------------------------------------
+    // drivers/{uid} — the driver's own record, and the customer's price board.
+    // ------------------------------------------------------------------------
+    match /drivers/{driverId} {
+
+      // One shape, checked in full. A partial check is how a client smuggles a
+      // field past the rules: `hasOnly` closes that door, and every value is
+      // bounded so a document cannot be used as free storage.
+      function isValidProfile() {
+        let data = request.resource.data;
+        let allowed = [
+          'firstName', 'lastName', 'email', 'phone',
+          'lat', 'lng', 'waterType', 'volumeM3', 'price',
+          'active', 'createdAt', 'updatedAt'
+        ];
+        return data.keys().hasAll(allowed)
+          && data.keys().hasOnly(allowed)
+          && data.firstName is string
+          && data.firstName.size() >= 1
+          && data.firstName.size() <= 40
+          && data.lastName is string
+          && data.lastName.size() >= 1
+          && data.lastName.size() <= 40
+          && data.email is string
+          && data.email.size() <= 120
+          && data.phone is string
+          && data.phone.matches('^0[567][0-9]{8}$')
+          && data.lat is number
+          && data.lat >= -90
+          && data.lat <= 90
+          && data.lng is number
+          && data.lng >= -180
+          && data.lng <= 180
+          && data.waterType is string
+          && data.waterType.size() <= 40
+          && data.volumeM3 is int
+          && data.volumeM3 > 0
+          && data.volumeM3 <= 100
+          && data.price is int
+          && data.price >= 0
+          && data.price <= 1000000
+          && data.active is bool
+          && data.createdAt is int
+          && data.updatedAt is int;
+      }
+
+      // Any signed-in user reads the board: the customer has no account of
+      // their own to be matched against, and the fields here are the offer the
+      // driver chose to publish. The email is in the document but never shown.
+      allow read: if isSignedIn();
+
+      // Written by its owner only, in the validated shape above. `setActive`
+      // and the edit form both go through this, because a merge write is
+      // validated against the merged document.
+      allow create, update: if isSignedIn()
+        && driverId == uid()
+        && isValidProfile();
+
+      // A driver leaving would orphan every order they claimed, and the app has
+      // no flow for that; deleting the profile is therefore not a client action.
+      allow delete: if false;
+    }
+
+    // ------------------------------------------------------------------------
+    // orders/{orderId} — written by the customer, claimed and driven by a
+    // driver, read by both.
+    // ------------------------------------------------------------------------
+    match /orders/{orderId} {
+
+      // The exact document the customer app writes. `driverUid`, `driverName`,
+      // `driverPhone` and `nearAt` must be empty here: those are the driver's
+      // fields, and a customer who could pre-fill them could forge a claim.
+      function isValidNewOrder() {
+        let data = request.resource.data;
+        let allowed = [
+          'customerUid', 'customerName', 'phone', 'placeName', 'lat', 'lng',
+          'waterType', 'volumeM3', 'price',
+          'driverUid', 'driverName', 'driverPhone',
+          'status', 'createdAt', 'updatedAt', 'nearAt'
+        ];
+        return data.keys().hasAll(allowed)
+          && data.keys().hasOnly(allowed)
+          && data.customerUid == uid()
+          && data.status == 'sent'
+          && data.driverUid == ''
+          && data.driverName == ''
+          && data.driverPhone == ''
+          && data.nearAt == null
+          && data.customerName is string
+          && data.customerName.size() >= 3
+          && data.customerName.size() <= 80
+          && data.phone is string
+          && data.phone.matches('^0[567][0-9]{8}$')
+          && data.placeName is string
+          && data.placeName.size() >= 2
+          && data.placeName.size() <= 160
+          && data.lat is number
+          && data.lat >= -90
+          && data.lat <= 90
+          && data.lng is number
+          && data.lng >= -180
+          && data.lng <= 180
+          && data.waterType is string
+          && data.waterType.size() <= 40
+          && data.volumeM3 is int
+          && data.volumeM3 > 0
+          && data.volumeM3 <= 100
+          && data.price is int
+          && data.price >= 0
+          && data.price <= 1000000
+          && data.createdAt is int
+          && data.updatedAt is int;
+      }
+
+      // The order lifecycle, as edges rather than states: a document can only
+      // move along these, so nothing can be revived or skipped.
+      function isValidTransition(from, to) {
+        return (from == 'sent' && (to == 'accepted' || to == 'cancelled'))
+          || (from == 'accepted' && (to == 'delivered' || to == 'cancelled'));
+      }
+
+      // The customer reads their own orders, the claiming driver reads theirs,
+      // and every registered driver reads the pool while it is unclaimed.
+      //
+      // A list query is filtered by these rules document by document, which is
+      // what makes the driver's `where('driverUid', '==', '')` query return the
+      // pool and nothing else.
+      allow read: if isSignedIn()
+        && (resource.data.customerUid == uid()
+            || resource.data.driverUid == uid()
+            || (resource.data.driverUid == ''
+                && isRegisteredDriver()));
+
+      allow create: if isSignedIn() && isValidNewOrder();
+
+      allow update: if isSignedIn() && (
+        // 1. A driver claims an unclaimed order. The terms are taken from the
+        //    driver's own profile at that moment — the price the customer saw
+        //    on the board is an offer, and this is the deal that closes.
+        (resource.data.driverUid == ''
+          && isRegisteredDriver()
+          && request.resource.data.driverUid == uid()
+          && request.resource.data.driverName is string
+          && request.resource.data.driverName.size() >= 1
+          && request.resource.data.driverName.size() <= 80
+          && request.resource.data.driverPhone is string
+          && request.resource.data.driverPhone.matches('^0[567][0-9]{8}$')
+          && request.resource.data.waterType is string
+          && request.resource.data.waterType.size() <= 40
+          && request.resource.data.volumeM3 is int
+          && request.resource.data.volumeM3 > 0
+          && request.resource.data.volumeM3 <= 100
+          && request.resource.data.price is int
+          && request.resource.data.price >= 0
+          && request.resource.data.price <= 1000000
+          && request.resource.data.status == 'accepted'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'driverUid', 'driverName', 'driverPhone',
+               'waterType', 'volumeM3', 'price',
+               'status', 'updatedAt'
+             ])
+          && request.resource.data.updatedAt is int)
+
+        // 2. The claiming driver works the order: announces they are near,
+        //    closes it as delivered. Only their own order, only forward — or
+        //    standing still. "أنا قريب" changes `nearAt` and nothing else, so a
+        //    rule that demanded a status *change* would reject the one write the
+        //    whole alert depends on; a repeat ping while the job is still
+        //    `accepted` is therefore allowed, and a ping after it is closed is
+        //    not.
+        || (resource.data.driverUid == uid()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'status', 'updatedAt', 'nearAt'
+             ])
+          && request.resource.data.updatedAt is int
+          && (request.resource.data.nearAt == null
+              || request.resource.data.nearAt is int)
+          && (isValidTransition(
+                resource.data.status,
+                request.resource.data.status
+              )
+              || (resource.data.status == 'accepted'
+                  && request.resource.data.status == 'accepted')))
+
+        // 3. The customer calls off their own order. The document stays so the
+        //    driver already driving to the address sees it was cancelled.
+        || (resource.data.customerUid == uid()
+          && request.resource.data.status == 'cancelled'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+               'status', 'updatedAt'
+             ])
+          && request.resource.data.updatedAt is int)
+      );
+
+      // Only the customer may remove an order, and only their own: it is their
+      // history entry. A driver's "reject" never deletes anything — it is a
+      // local dismissal, so the order stays available to everyone else.
+      allow delete: if isSignedIn()
+        && resource.data.customerUid == uid();
+    }
+
+    // No other collection is reachable from a client. Every path above grants
+    // access explicitly; this catch-all makes the default a denial.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

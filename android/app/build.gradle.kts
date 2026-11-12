@@ -2,6 +2,8 @@ plugins {
     id("com.android.application")
     // Kotlin language support.
     id("org.jetbrains.kotlin.android")
+    // Firebase: turns google-services.json into the generated resources.
+    id("com.google.gms.google-services")
 
     id("dev.flutter.flutter-gradle-plugin")
 }

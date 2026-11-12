@@ -16,4 +16,14 @@
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
         <item name="android:windowBackground">@android:color/black</item>
     </style>
+    <!-- The full-screen arrival alert. Its own theme, because it is a native
+         Activity outside the Flutter engine: no title bar, the canvas gradient
+         as the window background (no white flash before the first frame), and
+         transparent system bars so the gradient runs edge to edge. -->
+    <style name="ArrivalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@drawable/arrival_backdrop</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
 </resources>

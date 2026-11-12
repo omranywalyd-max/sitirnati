@@ -86,16 +86,15 @@ void main() {
     await pumpApp(tester);
     final order = Order(
       id: 'golden-order',
-      truckId: 't1',
-      driverName: 'كريم بلقاسم',
-      waterType: 'ماء صالح للشرب',
-      volumeM3: 10,
-      price: 4500,
+      customerUid: 'golden-customer',
       customerName: 'أمين بوقرة',
       phone: '0550123456',
       placeName: 'حي 5 جويلية، عمارة 12',
       lat: 36.75381,
       lng: 3.05877,
+      waterType: 'صالح للشرب',
+      volumeM3: 10,
+      price: 4500,
       createdAt: DateTime(2026, 11, 12, 14, 5),
     );
     final context = tester.element(find.byType(Scaffold).first);

@@ -13,6 +13,15 @@ analyzer:
   exclude:
     - build/**
     - android/**
+    # Archived Dart snippets handed over as zips (`exports/`), kept for
+    # reference only: they are fragments of third-party packages, not part of
+    # this app, and they cannot resolve their own imports from here.
+    - exports/**
+    # The driver app is a separate Flutter project nested in this repository so
+    # both halves ship from one clone. It has its own pubspec and its own
+    # analysis_options.yaml; analysing it from here would report its packages as
+    # missing and its paths as duplicates.
+    - driver_app/**
 
 linter:
   # The lint rules applied to this project can be customized in the

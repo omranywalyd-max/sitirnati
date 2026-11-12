@@ -44,6 +44,13 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# The driver app is a second Flutter project nested in this repo, so it needs
+# its own copies of the rules above: `/build/` only matches the root.
+/driver_app/build/
+/driver_app/android/app/debug
+/driver_app/android/app/profile
+/driver_app/android/app/release
+
 # Widget Preview related
 .widget_preview/
 
