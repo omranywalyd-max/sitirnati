@@ -241,8 +241,15 @@ app's own accent, with a non-dismissible barrier (`0xB8000000`).
 
 Algerian Darja, verbs first, no filler. "اطلب الآن", not "إرسال". Errors say
 what to do, not what failed: «خدمة الموقع مطفية. شغّلها من إعدادات الهاتف، ولا
-حدد مكانك بصباعك.» The submit footnote is honest about the absence of a
-backend: «الطلبية تتسجل في «طلبياتي» على هذا الهاتف بحالة مُرسل.»
+حدد مكانك بصباعك.» The submit footnote now describes the pool truthfully instead
+of a local-only write: «الطلب يوصل للسواقين المتوفرين كاملين، و أول واحد يقبلو
+ياخذو و يعيّطلك. تتبع الحالة في «طلبياتي».»
+
+The one piece of copy that has to persuade rather than inform is the
+overlay-permission dialog: it names the permission, says why («باش ما يفوتكش —
+حتى إذا كان الهاتف مقفول»), says what happens without it («التنبيه يبان غير كي
+تكون فاتح سيترنتي»), and offers two exits that both still place the order —
+«كمّل بلا التنبيه» and «افتح الإعدادات». No permission is ever a dead end.
 
 Numbers are written the way a customer says them: a volume is `10 000 لتر`
 (number first, then the unit word), not `10 م³`. The tank size is stored in
@@ -252,23 +259,34 @@ form summary, dialog, semantic label — shows the same string.
 
 ## 10. Verification
 
+What is actually run today, and what each one proves:
+
 ```powershell
-node tool/contrast_check.mjs                          # 38/38 pairs
-flutter analyze                                       # No issues found!
-flutter test                                          # 11/11 tests
-flutter test --update-goldens test/visual_test.dart    # refresh test/goldens
-node tool/sample_golden.mjs test/goldens/browse.png    # real pixels of bar/canvas/card
+node tool/contrast_check.mjs       # 38/38 pairs, measured on the token values
+flutter analyze                    # No issues found! (both apps)
+node tool/rules_e2e.mjs            # 32/32 checks against the live backend
 flutter build apk --split-per-abi --release
 ```
 
-Goldens (`browse.png`, `orders_empty.png`, `order_form.png`,
-`order_success.png`, `splash.png`) are rendered at 1170×2532 with the real
-Tajawal loaded, so they show the shipped type metrics rather than the harness
-default font.
+`contrast_check.mjs` is the gate that keeps "dark and muted" from becoming
+"dark and unreadable": it reads the tokens out of `app_theme.dart`, composites
+each pair the way the glass actually stacks, and prints the ratio per pair. The
+numbers in §3 come from that run, not from an eyedropper.
 
-`node tool/sample_golden.mjs test/goldens/browse.png` prints the real pixel
-colours of the bar, capsule, canvas and card. It is also the check that the
-baked canvas still reproduces the live blur: after the bake landed, the canvas
-above the bar read `#25282a` (was `#24272a`) and a card body `#212224` (was
-`#212124`) — a 1–2/255 bilinear difference, not a visual change. A near-black
-reading would mean the bake failed and `_LiveClouds` is running instead.
+**The widget and golden suite is stale and known to be stale.** `test/goldens/`
+still holds the boards from before the driver cards replaced the truck cards, so
+`flutter test` fails on the image comparison — that is a snapshot of a UI that no
+longer exists, not a regression. The suite is customer-app only (there is no
+driver-app test project). Re-baseline it before trusting it:
+
+```powershell
+flutter test --update-goldens test/visual_test.dart
+node tool/sample_golden.mjs test/goldens/browse.png
+```
+
+`sample_golden.mjs` prints the real pixel colours of the bar, capsule, canvas and
+card. It is also the check that the baked canvas still reproduces the live blur:
+after the bake landed, the canvas above the bar read `#25282a` (was `#24272a`) and
+a card body `#212224` (was `#212124`) — a 1–2/255 bilinear difference, not a
+visual change. A near-black reading would mean the bake failed and `_LiveClouds`
+is running instead.
